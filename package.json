@@ -1,0 +1,33 @@
+{
+  "name": "markdown-hover-glossary",
+  "displayName": "Markdown Hover Glossary (browser)",
+  "description": "Local browser viewer for Markdown docs with per-document glossaries: hover a term to see a rich definition and example. No document clutter.",
+  "version": "0.2.0",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "mdglossary": "scripts/cli.mjs"
+  },
+  "scripts": {
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "serve": "node scripts/serve.mjs",
+    "view": "node scripts/serve.mjs",
+    "export": "node scripts/build-html.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify": "node scripts/verify.mjs && node scripts/verify-dom.mjs",
+    "verify:dom": "node scripts/verify-dom.mjs"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "markdown-it": "^14.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^20.14.0",
+    "esbuild": "^0.24.0",
+    "jsdom": "^25.0.0",
+    "typescript": "^5.5.0"
+  }
+}

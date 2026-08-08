@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Glossary Viewer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="mhg-topbar">
+      <div class="mhg-bar-row">
+        <span class="mhg-brand">Glossary Viewer</span>
+        <form id="mhg-path-form" class="mhg-path-form" autocomplete="off">
+          <input
+            id="mhg-path"
+            class="mhg-path-input"
+            type="text"
+            placeholder="Paste a path to a Markdown file…  e.g. ~/swarun/notes/devmon-test-quality-plan.md"
+            list="mhg-recents"
+            spellcheck="false"
+          />
+          <datalist id="mhg-recents"></datalist>
+          <button type="submit" class="mhg-open-btn">Open</button>
+        </form>
+        <span id="mhg-status" class="mhg-status"></span>
+      </div>
+    </header>
+    <main id="mhg-content" class="mhg-content"></main>
+    <script src="/dist/app.js"></script>
+  </body>
+</html>
