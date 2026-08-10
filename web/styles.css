@@ -112,7 +112,7 @@ body {
   color: var(--muted);
   font-size: 0.78rem;
   white-space: nowrap;
-  max-width: 30ch;
+  max-width: 46ch;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -311,6 +311,143 @@ body {
 .mhg-card-link a {
   color: var(--link);
   text-decoration: none;
+}
+
+/* ---- Mermaid diagrams ---- */
+
+.mhg-mermaid {
+  position: relative;
+  margin: 1.4em 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  /* Diagram fills are mixed up from the page colour, so the card keeps that as
+     its base to preserve the intended depth order. */
+  background: var(--bg);
+  text-align: center;
+  overflow-x: auto;
+}
+
+.mhg-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Raw source, shown while pending and if rendering fails. */
+.mhg-mermaid .mhg-mermaid-src {
+  margin: 0;
+  text-align: left;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.mhg-mermaid[data-mhg-state="pending"] .mhg-mermaid-src {
+  opacity: 0.55;
+}
+
+.mhg-mermaid-error {
+  margin-bottom: 10px;
+  text-align: left;
+  color: var(--error);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.mhg-mermaid-expand {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  /* Discoverable at rest, prominent on hover. */
+  opacity: 0.45;
+  transition: opacity 0.12s ease;
+}
+.mhg-mermaid:hover .mhg-mermaid-expand,
+.mhg-mermaid-expand:focus {
+  opacity: 1;
+}
+.mhg-mermaid-expand:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+/* ---- Full-screen diagram viewer ---- */
+
+body.mhg-zoom-open {
+  overflow: hidden;
+}
+
+.mhg-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
+  cursor: grab;
+  touch-action: none;
+  overflow: hidden;
+}
+.mhg-zoom:active {
+  cursor: grabbing;
+}
+
+/* A panel behind the diagram, so a transparent SVG stays readable on the scrim. */
+.mhg-zoom-stage {
+  padding: 20px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  transform-origin: center center;
+  will-change: transform;
+}
+.mhg-zoom-stage svg {
+  display: block;
+  max-width: none;
+  max-height: none;
+}
+
+.mhg-zoom-bar {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px var(--card-shadow);
+}
+.mhg-zoom-bar button {
+  min-width: 32px;
+  padding: 5px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.mhg-zoom-bar button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .mhg-error {

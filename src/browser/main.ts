@@ -1,8 +1,11 @@
 import { mountGlossary, UiTerm, UiOptions } from "./glossary-ui";
+import { renderDiagrams } from "./mermaid-ui";
 
 interface DocData {
   contentHtml: string;
   terms: UiTerm[];
+  termSource?: "block" | "derived" | "none";
+  diagrams?: number;
   options?: UiOptions;
   filename?: string;
   path?: string;
@@ -30,6 +33,8 @@ function setStatus(text: string, isError = false) {
     return;
   }
   statusEl.textContent = text;
+  // The bar is narrow and ellipsises; keep the full text reachable on hover.
+  statusEl.title = text;
   statusEl.classList.toggle("mhg-status-error", isError);
 }
 
@@ -71,6 +76,8 @@ function renderDoc(data: DocData) {
     : "";
   container.innerHTML = errorHtml + (data.contentHtml || "");
   mountGlossary(container, data.terms || [], data.options || {});
+  // Diagrams draw asynchronously; the prose is already usable before they land.
+  void renderDiagrams(container);
 }
 
 function showEmpty() {
@@ -92,7 +99,12 @@ function setupLiveReload(p: string) {
   }
   try {
     liveSource = new EventSource("/api/events?path=" + encodeURIComponent(p));
-    liveSource.onmessage = () => {
+    liveSource.onmessage = (e) => {
+      // A rebuilt browser bundle can only take effect on a full page load.
+      if (e.data === "hard-reload") {
+        location.reload();
+        return;
+      }
       if (currentPath) {
         void loadPath(currentPath, { push: false, silent: true });
       }
@@ -148,7 +160,17 @@ async function loadPath(
   window.scrollTo(0, scrollY);
 
   const count = (data.terms || []).length;
-  setStatus(`${data.filename || resolved} · ${count} term${count === 1 ? "" : "s"}`);
+  const parts = [data.filename || resolved, `${count} term${count === 1 ? "" : "s"}`];
+  if (data.termSource === "derived") {
+    parts.push("from <abbr>/table (no glossary block)");
+  } else if (!count) {
+    parts.push("no glossary block found");
+  }
+  const diagrams = data.diagrams || 0;
+  if (diagrams) {
+    parts.push(`${diagrams} diagram${diagrams === 1 ? "" : "s"}`);
+  }
+  setStatus(parts.join(" · "));
   saveRecent(resolved);
 
   if (opts.push !== false) {

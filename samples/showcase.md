@@ -61,7 +61,35 @@ change is the job of consistent hashing. Tracking *who saw what, when* — so tw
 concurrent edits can be detected rather than blindly overwritten — is the job of
 a vector clock.
 
-## 5. What does *not* get underlined
+## 5. Diagrams
+
+A ```` ```mermaid ```` fence is drawn as a diagram. Hover **Expand** in the corner
+to open it full screen, where the scroll wheel zooms and dragging pans.
+
+```mermaid
+flowchart LR
+    C[Client] -->|write| L[Leader]
+    L -->|append| F1[Follower 1]
+    L -->|append| F2[Follower 2]
+    F1 -->|ack| L
+    F2 -->|ack| L
+    L -->|commit once a quorum acks| C
+```
+
+Diagram text is never treated as prose, so the word "quorum" above stays plain
+inside the diagram while still being hoverable in this sentence.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Store
+    Client->>Store: PUT /charges (Idempotency-Key: 8f3a)
+    Store-->>Client: 201 Created
+    Client->>Store: retry, same key
+    Store-->>Client: 200 OK (replayed, not charged twice)
+```
+
+## 6. What does *not* get underlined
 
 Glossary terms are matched in prose only. Inside code they're left alone, on
 purpose. This inline mention of `quorum` and this block are untouched:

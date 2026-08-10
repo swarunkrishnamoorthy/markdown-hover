@@ -13,7 +13,7 @@ export interface UiOptions {
   caseSensitive?: boolean;
 }
 
-const SKIP_SELECTOR = "code, pre, a, .mhg-term";
+const SKIP_SELECTOR = "code, pre, a, .mhg-term, .mhg-mermaid";
 const HIDE_DELAY = 200;
 
 let currentTerms: UiTerm[] = [];

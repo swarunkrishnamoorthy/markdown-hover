@@ -3,16 +3,40 @@
 //   node scripts/serve.mjs [defaultFile.md] [--port 4321] [--no-open]
 import http from "node:http";
 import os from "node:os";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { watch } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { exec } from "node:child_process";
-import { renderDocument } from "../dist/core.node.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const webDir = path.join(root, "web");
+const corePath = path.join(root, "dist", "core.node.mjs");
+const appJsPath = path.join(webDir, "dist", "app.js");
+
+// The renderer is re-imported whenever the bundle changes on disk. A static
+// import would pin the build that existed when the server started, so a rebuild
+// would silently keep serving the old renderer until someone restarted.
+let corePromise = null;
+let coreStamp = -1;
+
+async function mtimeOf(p) {
+  try {
+    return (await stat(p)).mtimeMs;
+  } catch {
+    return -1;
+  }
+}
+
+async function loadCore() {
+  const stamp = await mtimeOf(corePath);
+  if (!corePromise || stamp !== coreStamp) {
+    coreStamp = stamp;
+    corePromise = import(`${pathToFileURL(corePath).href}?v=${stamp}`);
+  }
+  return corePromise;
+}
 
 function parseArgs(argv) {
   const args = { port: Number(process.env.PORT) || 4321, open: true, file: null };
@@ -91,6 +115,7 @@ async function renderPath(rawPath) {
     return { error: `Path is a directory: ${resolved}`, contentHtml: "", terms: [], path: resolved };
   }
   const src = await readFile(resolved, "utf8");
+  const { renderDocument } = await loadCore();
   const rendered = renderDocument(src);
   return {
     ...rendered,
@@ -110,7 +135,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === "/styles.css") {
     return serveStatic(res, "styles.css");
   }
-  if (pathname.startsWith("/dist/")) {
+  if (pathname.startsWith("/dist/") || pathname.startsWith("/vendor/")) {
     return serveStatic(res, pathname.replace(/^\//, ""));
   }
 
@@ -138,28 +163,37 @@ const server = http.createServer(async (req, res) => {
       connection: "keep-alive",
     });
     res.write("retry: 1000\n\n");
-    if (!p) {
-      return;
-    }
-    const resolved = expandPath(p);
+
+    const watchers = [];
     let debounce = null;
-    let watcher = null;
-    try {
-      watcher = watch(resolved, () => {
-        if (debounce) {
-          clearTimeout(debounce);
-        }
-        debounce = setTimeout(() => res.write("data: reload\n\n"), 120);
-      });
-    } catch {
-      /* watch may fail on some filesystems; static view still works */
+    const notify = (kind) => {
+      if (debounce) {
+        clearTimeout(debounce);
+      }
+      debounce = setTimeout(() => res.write(`data: ${kind}\n\n`), 120);
+    };
+    const addWatch = (target, kind) => {
+      try {
+        watchers.push(watch(target, () => notify(kind)));
+      } catch {
+        /* watch may fail on some filesystems; static view still works */
+      }
+    };
+
+    if (p) {
+      addWatch(expandPath(p), "reload");
     }
+    // A rebuilt renderer only needs the content re-fetched; a rebuilt browser
+    // bundle needs the whole page reloaded to pick up the new script.
+    addWatch(corePath, "reload");
+    addWatch(appJsPath, "hard-reload");
+
     req.on("close", () => {
       if (debounce) {
         clearTimeout(debounce);
       }
-      if (watcher) {
-        watcher.close();
+      for (const w of watchers) {
+        w.close();
       }
     });
     return;
@@ -168,7 +202,39 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404).end("Not found");
 });
 
+/** Newest mtime under a directory, so we can tell if a build is behind its sources. */
+async function newestMtime(dir) {
+  let newest = 0;
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return newest;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    newest = Math.max(newest, entry.isDirectory() ? await newestMtime(full) : await mtimeOf(full));
+  }
+  return newest;
+}
+
+async function warnIfStale() {
+  const [srcTime, coreTime, appTime] = await Promise.all([
+    newestMtime(path.join(root, "src")),
+    mtimeOf(corePath),
+    mtimeOf(appJsPath),
+  ]);
+  if (coreTime < 0 || appTime < 0) {
+    console.log("  ! No build found in dist/. Run `npm run build`.\n");
+    return;
+  }
+  if (srcTime > Math.min(coreTime, appTime)) {
+    console.log("  ! src/ is newer than the build. Run `npm run build` (or `npm run watch`).\n");
+  }
+}
+
 server.listen(args.port, "127.0.0.1", () => {
+  void warnIfStale();
   const base = `http://localhost:${args.port}/`;
   const openUrl = defaultPath ? base + "?path=" + encodeURIComponent(defaultPath) : base;
   console.log(`\n  Glossary Viewer running`);
