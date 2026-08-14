@@ -313,6 +313,111 @@ body {
   text-decoration: none;
 }
 
+.mhg-card-actions {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  text-align: right;
+}
+.mhg-card-hide {
+  padding: 3px 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mhg-card-hide:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+/* ---- Hidden terms ---- */
+
+.mhg-hidden-btn {
+  flex: none;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mhg-hidden-btn:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.mhg-hidden-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mhg-hidden-panel {
+  position: absolute;
+  z-index: 10001;
+  min-width: 260px;
+  max-width: 380px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px var(--card-shadow);
+  font-size: 0.85rem;
+}
+
+.mhg-hidden-heading {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.mhg-hidden-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mhg-hidden-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-top: 1px solid var(--border);
+}
+.mhg-hidden-list li:first-child {
+  border-top: none;
+}
+
+.mhg-hidden-term {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mhg-hidden-restore {
+  flex: none;
+  padding: 2px 9px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mhg-hidden-restore:hover {
+  border-color: var(--accent);
+}
+
 /* ---- Mermaid diagrams ---- */
 
 .mhg-mermaid {
@@ -457,4 +562,10 @@ body.mhg-zoom-open {
   background: color-mix(in srgb, var(--error) 10%, transparent);
   color: var(--error);
   border-radius: 6px;
+  /* Parse errors point at a column with a caret, so columns have to line up. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
 }

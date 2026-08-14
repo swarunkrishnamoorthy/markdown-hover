@@ -1,6 +1,7 @@
 import MarkdownIt from "markdown-it";
 import { extractGlossary } from "./glossary";
 import { deriveTerms } from "./derive-terms";
+import { partitionDismissed, surfacesOf } from "./dismissed";
 import { GlossaryTerm } from "./term-index";
 
 // Blurb renderer for definition/example Markdown -> HTML. html:false so any raw
@@ -61,7 +62,14 @@ export interface RenderedDoc {
   termSource: TermSource;
   /** Number of ```mermaid fences found, for the status line. */
   diagrams: number;
+  /** Terms this document defines that the reader has permanently hidden. */
+  hidden: number;
   error?: string;
+}
+
+export interface RenderOptions {
+  /** Canonical terms the reader has hidden, from the on-disk blacklist. */
+  dismissed?: readonly string[];
 }
 
 const ABBR_TAG_RE = /<abbr\s+[^>]*?title\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>([\s\S]*?)<\/abbr>/gi;
@@ -78,14 +86,17 @@ function dropCoveredAbbrTitles(html: string, surfaces: Set<string>): string {
   });
 }
 
-export function renderDocument(src: string): RenderedDoc {
+export function renderDocument(src: string, options: RenderOptions = {}): RenderedDoc {
   const { found, glossary, strippedSrc } = extractGlossary(src);
 
   const blockTerms = glossary?.terms || [];
   const useBlock = found && blockTerms.length > 0;
-  const sourceTerms: GlossaryTerm[] = useBlock ? blockTerms : deriveTerms(src);
+  const definedTerms: GlossaryTerm[] = useBlock ? blockTerms : deriveTerms(src);
+  // The blacklist applies whatever the source: a term you know is a term you
+  // know, whether the document defined it or the viewer derived it.
+  const { kept: sourceTerms, hidden } = partitionDismissed(definedTerms, options.dismissed);
   let termSource: TermSource = "none";
-  if (sourceTerms.length) {
+  if (definedTerms.length) {
     termSource = useBlock ? "block" : "derived";
   }
 
@@ -93,13 +104,9 @@ export function renderDocument(src: string): RenderedDoc {
   const diagramCount = installMermaidFence(contentMd);
   let contentHtml = contentMd.render(strippedSrc);
 
-  const surfaces = new Set<string>();
-  for (const t of sourceTerms) {
-    surfaces.add(t.term.toLowerCase());
-    for (const a of t.aliases || []) {
-      surfaces.add(a.toLowerCase());
-    }
-  }
+  // Hidden terms are stripped too. Leaving their `title` in place would swap our
+  // card for the browser's native tooltip, which is the opposite of hiding them.
+  const surfaces = surfacesOf(definedTerms);
   if (surfaces.size) {
     contentHtml = dropCoveredAbbrTitles(contentHtml, surfaces);
   }
@@ -112,5 +119,12 @@ export function renderDocument(src: string): RenderedDoc {
     link: t.link,
   }));
 
-  return { contentHtml, terms, termSource, diagrams: diagramCount(), error: glossary?.error };
+  return {
+    contentHtml,
+    terms,
+    termSource,
+    diagrams: diagramCount(),
+    hidden: hidden.length,
+    error: glossary?.error,
+  };
 }

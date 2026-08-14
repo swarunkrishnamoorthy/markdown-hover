@@ -19,14 +19,14 @@ function check(label, cond) {
   }
 }
 
-async function mount(markdown, filename, setup) {
-  const dom = new JSDOM(
-    `<!DOCTYPE html><html><body>
-    <header class="mhg-topbar"><input id="mhg-path"/><span id="mhg-status"></span><datalist id="mhg-recents"></datalist></header>
+const PAGE = `<!DOCTYPE html><html><body>
+    <header class="mhg-topbar"><input id="mhg-path"/><span id="mhg-status"></span>
+    <button id="mhg-hidden" hidden>Hidden 0</button><datalist id="mhg-recents"></datalist></header>
     <main id="mhg-content" class="mhg-content"></main>
-  </body></html>`,
-    { runScripts: "outside-only", pretendToBeVisual: true }
-  );
+  </body></html>`;
+
+async function mount(markdown, filename, setup) {
+  const dom = new JSDOM(PAGE, { runScripts: "outside-only", pretendToBeVisual: true });
   const { window } = dom;
   window.console = console;
   if (setup) {
@@ -171,6 +171,144 @@ check("page scroll locked while open", mDoc.body.classList.contains("mhg-zoom-op
 await new Promise((r) => setTimeout(r, 20));
 check("close removes the overlay", !mDoc.querySelector(".mhg-zoom"));
 check("page scroll restored", !mDoc.body.classList.contains("mhg-zoom-open"));
+
+// Hiding a term, driven through the same code path the real viewer uses: no
+// inlined data, a stubbed server, and a click on the card's Hide button.
+function jsonResponse(body) {
+  return Promise.resolve({ ok: true, status: 200, json: async () => body });
+}
+
+async function mountServed(markdown, filename) {
+  const dismissed = [];
+  const posts = [];
+  const dom = new JSDOM(PAGE, {
+    runScripts: "outside-only",
+    pretendToBeVisual: true,
+    url: `http://localhost/?path=/tmp/${filename}`,
+  });
+  const { window } = dom;
+  window.console = console;
+  window.scrollTo = () => {}; // jsdom has no layout; the real viewer restores scroll here
+  window.fetch = (input, init = {}) => {
+    const url = new URL(String(input), "http://localhost");
+    const entries = () => dismissed.map((term) => ({ term }));
+    if (url.pathname === "/api/render") {
+      return jsonResponse({
+        ...renderDocument(markdown, { dismissed }),
+        path: `/tmp/${filename}`,
+        filename,
+        options: { matchAllOccurrences: true, caseSensitive: false },
+      });
+    }
+    if (url.pathname === "/api/dismissed") {
+      if (init.method === "POST") {
+        const body = JSON.parse(init.body);
+        posts.push(body);
+        dismissed.push(body.term);
+      } else if (init.method === "DELETE") {
+        const term = (url.searchParams.get("term") || "").toLowerCase();
+        const at = dismissed.findIndex((t) => t.toLowerCase() === term);
+        if (at >= 0) {
+          dismissed.splice(at, 1);
+        }
+      }
+      return jsonResponse({ terms: entries() });
+    }
+    return jsonResponse({});
+  };
+  window.eval(appJs);
+  await new Promise((r) => setTimeout(r, 60));
+  return { window, posts, dismissed };
+}
+
+const hideMd = [
+  "# H",
+  "",
+  "Nomad schedules the work and Envoy proxies it.",
+  "",
+  "<!-- glossary",
+  "terms:",
+  "  - term: Nomad",
+  "    definition: A scheduler.",
+  "  - term: Envoy",
+  "    definition: A proxy.",
+  "-->",
+  "",
+].join("\n");
+
+const served = await mountServed(hideMd, "hide.md");
+const hDoc = served.window.document;
+const termFor = (name) =>
+  [...hDoc.querySelectorAll(".mhg-term")].find((t) => t.textContent === name);
+
+check("served doc underlines its terms", !!termFor("Nomad") && !!termFor("Envoy"));
+
+termFor("Nomad").dispatchEvent(new served.window.MouseEvent("mouseover", { bubbles: true }));
+const hideBtn = hDoc.querySelector(".mhg-card-hide");
+check("card offers a hide button", !!hideBtn);
+
+hideBtn.dispatchEvent(new served.window.MouseEvent("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 60));
+
+check("hiding posts the canonical term", served.posts.length === 1 && served.posts[0].term === "Nomad");
+check("hiding records the document", served.posts[0].from === "/tmp/hide.md");
+check("hidden term stops being underlined", !termFor("Nomad"));
+check("other terms keep working", !!termFor("Envoy"));
+check("card is dismissed after hiding", hDoc.querySelector(".mhg-card").style.display === "none");
+check("status reports the hidden count", /1 hidden/.test(hDoc.getElementById("mhg-status").textContent));
+
+const hiddenButton = hDoc.getElementById("mhg-hidden");
+check("hidden button becomes usable", !hiddenButton.hidden && !hiddenButton.disabled);
+check("hidden button shows the count", hiddenButton.textContent === "Hidden 1");
+
+hiddenButton.dispatchEvent(new served.window.MouseEvent("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 40));
+const panel = hDoc.querySelector(".mhg-hidden-panel");
+check("panel lists hidden terms", !!panel && /Nomad/.test(panel.textContent));
+
+panel.querySelector(".mhg-hidden-restore").dispatchEvent(
+  new served.window.MouseEvent("click", { bubbles: true })
+);
+await new Promise((r) => setTimeout(r, 60));
+check("restoring clears the blacklist", served.dismissed.length === 0);
+check("restored term is underlined again", !!termFor("Nomad"));
+
+// The standalone export has no server, so it must not offer to hide anything.
+const exported = await mount(hideMd, "hide.md");
+exported.document
+  .querySelector(".mhg-term")
+  .dispatchEvent(new exported.MouseEvent("mouseover", { bubbles: true }));
+check(
+  "no hide button without a server",
+  !exported.document.querySelector(".mhg-card-hide")
+);
+
+// A glossary block that fails to parse must still show the doc, and must say so
+// accurately -- reporting "no glossary block found" sends the author looking in
+// the wrong place. The excerpt is preformatted and never interpreted as HTML.
+const badYamlMd = [
+  "# Bad",
+  "",
+  "Body text.",
+  "",
+  "<!-- glossary",
+  "- term: A",
+  "  definition: <img src=x onerror=alert(1)>",
+  "  example: `x`",
+  "-->",
+].join("\n");
+const bad = await mountServed(badYamlMd, "bad.md");
+const errorEl = bad.window.document.querySelector(".mhg-error");
+check("parse error is shown", !!errorEl);
+check("parse error uses a pre", errorEl?.tagName === "PRE");
+check("parse error keeps its line breaks", (errorEl?.textContent.match(/\n/g) || []).length > 3);
+check("parse error names the document line", /\(line 8, column \d+\)/.test(errorEl?.textContent));
+check("document text cannot inject markup", !errorEl?.querySelector("img"));
+check("prose still renders alongside the error", /Body text/.test(bad.window.document.body.textContent));
+check(
+  "status blames the parse, not a missing block",
+  /failed to parse/.test(bad.window.document.querySelector("#mhg-status").textContent)
+);
 
 console.log(failures === 0 ? "\nDOM checks passed." : `\n${failures} DOM check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -77,6 +77,24 @@ Matching is whole-word and case-insensitive by default. Longer phrases win over
 shorter ones they contain. Terms inside code spans, code blocks, and links are
 never marked.
 
+The `terms:` key is optional — a bare list of entries at the top level works too.
+
+### YAML gotchas
+
+The block is YAML, so a value that starts with a backtick has to be quoted.
+This is the single most common way to break a block, because writing an example
+as inline code is the natural instinct in a Markdown file:
+
+```yaml
+example: `foo --bar`      # breaks: backtick is a reserved YAML indicator
+example: "`foo --bar`"    # fine
+example: |                # fine, and better for anything multi-line
+  `foo --bar`
+```
+
+When a block fails to parse, the viewer shows the document line and column of
+the offending line and still renders the rest of the document.
+
 ### When there's no glossary block
 
 Plenty of documents were written before this viewer existed and carry their
@@ -99,6 +117,42 @@ hijack `DAG`.
 These fallbacks are lossy — no examples, no links — and apply only when no
 `glossary` block is present. The status bar says which source was used. To take
 full control of a document, add a real block.
+
+## Hiding terms you already know
+
+Every hover card has a **Hide this term** button. Pressing it stops that term
+being highlighted — not just in the current document, but in every document you
+open afterwards. Knowing what Nomad is once means knowing it everywhere.
+
+The list lives at `~/.config/markdown-hover/dismissed-terms.json` (or under
+`$XDG_CONFIG_HOME`), and every render consults it, including `npm run export`.
+Set `MHG_DISMISSED_FILE` to point somewhere else.
+
+```json
+{
+  "version": 1,
+  "terms": [
+    { "term": "Nomad", "dismissedAt": "2026-08-10T19:50:33.500Z", "from": "/Users/me/primer.md" }
+  ]
+}
+```
+
+The file is read fresh on every render, so you can edit it by hand and just
+reload. A bare `["Nomad", "Envoy"]` array works too, and a file that is missing
+or malformed is treated as empty rather than breaking the page.
+
+Notes:
+
+- Hiding is keyed on the canonical term and takes that entry's aliases with it,
+  so hiding `ash1` also stops `ash2` from matching.
+- It applies whatever the source, whether the document defined the term in a
+  `glossary` block or the viewer derived it from an `<abbr>` or table.
+- A hidden `<abbr>` also loses its `title`, so it doesn't fall back to the
+  browser's native tooltip.
+- The topbar shows a **Hidden N** button listing what you've hidden, with a
+  **Restore** next to each. Nothing is permanent in the unrecoverable sense.
+- Standalone exports have no server to write to, so they show no Hide button.
+  They do respect the blacklist as it stood when the file was exported.
 
 ## Diagrams
 
@@ -135,6 +189,8 @@ Notes:
   the term matcher.
 - `src/derive-terms.ts` — fallback harvesting of `<abbr>` tags and Glossary tables
   for documents with no block.
+- `src/dismissed.ts` + `src/dismissed-store.ts` — filter out terms the reader has
+  hidden, and read/write the blacklist file.
 - `src/render.ts` — render Markdown to HTML (glossary stripped) and pre-render each
   definition/example blurb to HTML. Also turns ```` ```mermaid ```` fences into
   placeholders. Bundled to `dist/core.node.mjs`.

@@ -6,10 +6,17 @@ interface DocData {
   terms: UiTerm[];
   termSource?: "block" | "derived" | "none";
   diagrams?: number;
+  hidden?: number;
   options?: UiOptions;
   filename?: string;
   path?: string;
   error?: string;
+}
+
+interface DismissedEntry {
+  term: string;
+  dismissedAt?: string;
+  from?: string;
 }
 
 declare global {
@@ -27,6 +34,10 @@ let statusEl: HTMLElement | null = null;
 let recentsEl: HTMLDataListElement | null = null;
 let liveSource: EventSource | null = null;
 let currentPath: string | null = null;
+let hiddenBtn: HTMLButtonElement | null = null;
+let hiddenPanel: HTMLElement | null = null;
+/** Standalone exports have no server, so hiding cannot be persisted there. */
+let hasServer = true;
 
 function setStatus(text: string, isError = false) {
   if (!statusEl) {
@@ -67,15 +78,148 @@ function renderRecents() {
     .join("");
 }
 
+async function fetchDismissed(): Promise<DismissedEntry[]> {
+  try {
+    const data = (await fetch("/api/dismissed").then((r) => r.json())) as {
+      terms?: DismissedEntry[];
+    };
+    return data.terms || [];
+  } catch {
+    return [];
+  }
+}
+
+function refreshHiddenButton(entries: DismissedEntry[]) {
+  if (!hiddenBtn) {
+    return;
+  }
+  hiddenBtn.hidden = !hasServer;
+  hiddenBtn.textContent = `Hidden ${entries.length}`;
+  hiddenBtn.disabled = entries.length === 0;
+  hiddenBtn.title = entries.length
+    ? "Review the terms you have hidden"
+    : "Terms you hide from a card are listed here";
+}
+
+function reloadCurrent() {
+  if (currentPath) {
+    void loadPath(currentPath, { push: false, silent: true });
+  }
+}
+
+async function dismissTerm(term: string) {
+  try {
+    const res = await fetch("/api/dismissed", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ term, from: currentPath || undefined }),
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch (err) {
+    setStatus(`Could not hide "${term}": ${String(err)}`, true);
+    return;
+  }
+  closeHiddenPanel();
+  void fetchDismissed().then(refreshHiddenButton);
+  reloadCurrent();
+}
+
+async function restoreTerm(term: string) {
+  try {
+    await fetch(`/api/dismissed?term=${encodeURIComponent(term)}`, { method: "DELETE" });
+  } catch (err) {
+    setStatus(`Could not restore "${term}": ${String(err)}`, true);
+    return;
+  }
+  await openHiddenPanel();
+  reloadCurrent();
+}
+
+function closeHiddenPanel() {
+  if (hiddenPanel) {
+    hiddenPanel.remove();
+    hiddenPanel = null;
+  }
+}
+
+async function openHiddenPanel() {
+  const entries = await fetchDismissed();
+  refreshHiddenButton(entries);
+  closeHiddenPanel();
+  if (!entries.length) {
+    return;
+  }
+
+  const panel = document.createElement("div");
+  panel.className = "mhg-hidden-panel";
+
+  const heading = document.createElement("div");
+  heading.className = "mhg-hidden-heading";
+  heading.textContent = `${entries.length} hidden term${entries.length === 1 ? "" : "s"}`;
+  panel.appendChild(heading);
+
+  const list = document.createElement("ul");
+  list.className = "mhg-hidden-list";
+  for (const entry of entries) {
+    const row = document.createElement("li");
+
+    const name = document.createElement("span");
+    name.className = "mhg-hidden-term";
+    name.textContent = entry.term;
+    if (entry.from) {
+      name.title = `Hidden from ${entry.from}`;
+    }
+
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "mhg-hidden-restore";
+    restore.textContent = "Restore";
+    restore.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void restoreTerm(entry.term);
+    });
+
+    row.appendChild(name);
+    row.appendChild(restore);
+    list.appendChild(row);
+  }
+  panel.appendChild(list);
+
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  document.body.appendChild(panel);
+  hiddenPanel = panel;
+
+  if (hiddenBtn) {
+    const rect = hiddenBtn.getBoundingClientRect();
+    panel.style.top = `${rect.bottom + window.scrollY + 6}px`;
+    const right = Math.max(8, document.documentElement.clientWidth - rect.right);
+    panel.style.right = `${right}px`;
+  }
+}
+
+// Parse errors carry an indented excerpt with a caret, so they need <pre> to
+// stay legible, and textContent so document text can never inject markup.
+function errorBlock(message: string): HTMLElement {
+  const box = document.createElement("pre");
+  box.className = "mhg-error";
+  box.textContent = message;
+  return box;
+}
+
 function renderDoc(data: DocData) {
   if (!container) {
     return;
   }
-  const errorHtml = data.error
-    ? `<div class="mhg-error">${data.error}</div>`
-    : "";
-  container.innerHTML = errorHtml + (data.contentHtml || "");
-  mountGlossary(container, data.terms || [], data.options || {});
+  container.innerHTML = data.contentHtml || "";
+  if (data.error) {
+    container.prepend(errorBlock(data.error));
+  }
+  mountGlossary(container, data.terms || [], {
+    ...(data.options || {}),
+    onDismiss: hasServer ? (term) => void dismissTerm(term) : undefined,
+  });
   // Diagrams draw asynchronously; the prose is already usable before they land.
   void renderDiagrams(container);
 }
@@ -135,9 +279,8 @@ async function loadPath(
   } catch (err) {
     setStatus("Request failed", true);
     if (container) {
-      container.innerHTML = `<div class="mhg-error">Could not reach the server: ${String(
-        err
-      )}</div>`;
+      container.textContent = "";
+      container.append(errorBlock(`Could not reach the server: ${String(err)}`));
     }
     return;
   }
@@ -149,9 +292,10 @@ async function loadPath(
   }
 
   if (data.error && !data.contentHtml) {
-    setStatus(data.error, true);
+    setStatus(data.error.split("\n")[0], true);
     if (container) {
-      container.innerHTML = `<div class="mhg-error">${data.error}</div>`;
+      container.textContent = "";
+      container.append(errorBlock(data.error));
     }
     return;
   }
@@ -161,7 +305,9 @@ async function loadPath(
 
   const count = (data.terms || []).length;
   const parts = [data.filename || resolved, `${count} term${count === 1 ? "" : "s"}`];
-  if (data.termSource === "derived") {
+  if (data.error) {
+    parts.push("glossary block failed to parse");
+  } else if (data.termSource === "derived") {
     parts.push("from <abbr>/table (no glossary block)");
   } else if (!count) {
     parts.push("no glossary block found");
@@ -169,6 +315,9 @@ async function loadPath(
   const diagrams = data.diagrams || 0;
   if (diagrams) {
     parts.push(`${diagrams} diagram${diagrams === 1 ? "" : "s"}`);
+  }
+  if (data.hidden) {
+    parts.push(`${data.hidden} hidden`);
   }
   setStatus(parts.join(" · "));
   saveRecent(resolved);
@@ -195,6 +344,23 @@ function wireBar() {
       void loadPath(p, { push: false });
     }
   });
+
+  if (hiddenBtn) {
+    hiddenBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (hiddenPanel) {
+        closeHiddenPanel();
+      } else {
+        void openHiddenPanel();
+      }
+    });
+  }
+  document.addEventListener("click", () => closeHiddenPanel());
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeHiddenPanel();
+    }
+  });
 }
 
 async function boot() {
@@ -202,9 +368,12 @@ async function boot() {
   pathInput = document.getElementById("mhg-path") as HTMLInputElement | null;
   statusEl = document.getElementById("mhg-status");
   recentsEl = document.getElementById("mhg-recents") as HTMLDataListElement | null;
+  hiddenBtn = document.getElementById("mhg-hidden") as HTMLButtonElement | null;
 
-  // Standalone export: data is inlined, hide the bar and just render.
+  // Standalone export: data is inlined, hide the bar and just render. There is
+  // no server, so terms can only be hidden before the export is generated.
   if (window.__MHG_DATA__) {
+    hasServer = false;
     const topbar = document.querySelector(".mhg-topbar");
     if (topbar instanceof HTMLElement) {
       topbar.style.display = "none";
@@ -215,6 +384,7 @@ async function boot() {
 
   renderRecents();
   wireBar();
+  void fetchDismissed().then(refreshHiddenButton);
 
   const fromUrl = new URLSearchParams(location.search).get("path");
   if (fromUrl) {

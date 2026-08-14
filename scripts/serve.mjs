@@ -115,14 +115,30 @@ async function renderPath(rawPath) {
     return { error: `Path is a directory: ${resolved}`, contentHtml: "", terms: [], path: resolved };
   }
   const src = await readFile(resolved, "utf8");
-  const { renderDocument } = await loadCore();
-  const rendered = renderDocument(src);
+  const { renderDocument, readDismissedTerms } = await loadCore();
+  // Read per request so hand-edits to the blacklist take effect on reload.
+  const rendered = renderDocument(src, { dismissed: readDismissedTerms() });
   return {
     ...rendered,
     path: resolved,
     filename: path.basename(resolved),
     options: { matchAllOccurrences: true, caseSensitive: false },
   };
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1e6) {
+        req.destroy();
+        reject(new Error("Body too large"));
+      }
+    });
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -141,6 +157,32 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === "/api/config") {
     return sendJson(res, 200, { defaultPath, cwd: process.cwd() });
+  }
+
+  if (pathname === "/api/dismissed") {
+    const core = await loadCore();
+    try {
+      if (req.method === "POST") {
+        const { term, from } = JSON.parse((await readBody(req)) || "{}");
+        if (!term || typeof term !== "string") {
+          return sendJson(res, 400, { error: "Missing term" });
+        }
+        return sendJson(res, 200, { terms: core.addDismissed(term, from) });
+      }
+      if (req.method === "DELETE") {
+        const term = url.searchParams.get("term");
+        if (!term) {
+          return sendJson(res, 400, { error: "Missing ?term" });
+        }
+        return sendJson(res, 200, { terms: core.removeDismissed(term) });
+      }
+      return sendJson(res, 200, {
+        terms: core.readDismissed(),
+        file: core.dismissedFilePath(),
+      });
+    } catch (err) {
+      return sendJson(res, 500, { error: String(err) });
+    }
   }
 
   if (pathname === "/api/render") {

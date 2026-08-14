@@ -4,7 +4,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderDocument } from "../dist/core.node.mjs";
+import { renderDocument, readDismissedTerms } from "../dist/core.node.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -35,7 +35,7 @@ async function main() {
     readFile(path.join(root, "web", "styles.css"), "utf8"),
   ]);
 
-  const rendered = renderDocument(src);
+  const rendered = renderDocument(src, { dismissed: readDismissedTerms() });
   const data = {
     ...rendered,
     filename: path.basename(inFile),

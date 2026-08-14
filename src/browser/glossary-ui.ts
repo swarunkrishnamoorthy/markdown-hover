@@ -11,6 +11,8 @@ export interface UiTerm {
 export interface UiOptions {
   matchAllOccurrences?: boolean;
   caseSensitive?: boolean;
+  /** Supplied only when a server is there to persist the choice. */
+  onDismiss?: (term: string) => void;
 }
 
 const SKIP_SELECTOR = "code, pre, a, .mhg-term, .mhg-mermaid";
@@ -18,6 +20,7 @@ const HIDE_DELAY = 200;
 
 let currentTerms: UiTerm[] = [];
 let caseSensitive = false;
+let dismissHandler: ((term: string) => void) | null = null;
 let card: HTMLDivElement | null = null;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
 let pinned = false;
@@ -129,7 +132,24 @@ function renderCard(term: UiTerm) {
   if (term.link) {
     html += `<div class="mhg-card-link"><a href="${escapeHtml(term.link)}" target="_blank" rel="noopener">More &rarr;</a></div>`;
   }
+  if (dismissHandler) {
+    html +=
+      `<div class="mhg-card-actions">` +
+      `<button type="button" class="mhg-card-hide" title="Stop highlighting this term in every document">` +
+      `Hide this term</button></div>`;
+  }
   c.innerHTML = html;
+
+  const hide = c.querySelector(".mhg-card-hide");
+  if (hide && dismissHandler) {
+    const handler = dismissHandler;
+    hide.addEventListener("click", (e) => {
+      e.stopPropagation();
+      pinned = false;
+      hideCard();
+      handler(term.term);
+    });
+  }
 }
 
 function positionCard(anchor: HTMLElement) {
@@ -277,6 +297,7 @@ function attachGlobalListeners() {
 export function mountGlossary(container: HTMLElement, terms: UiTerm[], options: UiOptions = {}) {
   currentTerms = terms || [];
   caseSensitive = !!options.caseSensitive;
+  dismissHandler = options.onDismiss || null;
   pinned = false;
   hideCard();
   wrapTerms(container, options);

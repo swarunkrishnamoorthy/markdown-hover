@@ -1,5 +1,6 @@
 // Node-side checks for the parser + renderer. Run with `npm run verify`.
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
@@ -8,6 +9,11 @@ import {
   renderDocument,
   harvestGlossaryTable,
   harvestAbbrTags,
+  partitionDismissed,
+  readDismissed,
+  readDismissedTerms,
+  addDismissed,
+  removeDismissed,
 } from "../dist/core.node.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,6 +58,52 @@ const withExample = doc.terms.find((t) => t.exampleHtml);
 check("example code rendered", withExample && /<pre>/.test(withExample.exampleHtml));
 check("term source is the block", doc.termSource === "block");
 
+// a bare top-level list is shorthand for `terms:`
+const bareList = extractGlossary("# T\n\n<!-- glossary\n- term: Nomad\n  definition: Scheduler.\n-->\n");
+check("bare list parses", bareList.found && !bareList.glossary.error);
+check("bare list yields terms", bareList.glossary.terms.length === 1);
+check("bare list term is read", bareList.glossary.terms[0].term === "Nomad");
+
+// parse errors report the document's line numbers, not the block's
+const brokenSrc = [
+  "# Title",
+  "",
+  "text",
+  "",
+  "<!-- glossary",
+  "- term: A",
+  "  definition: A thing.",
+  "  example: `x`",
+  "-->",
+].join("\n");
+const broken = extractGlossary(brokenSrc);
+check("broken block still detected", broken.found);
+check("broken block reports an error", !!broken.glossary.error);
+// The offending value sits on document line 8; js-yaml alone would say 4.
+check("error uses document line numbers", /\(line 8, column \d+\)/.test(broken.glossary.error));
+check("error excerpt is renumbered", /^\s*8 \|\s+example: `x`$/m.test(broken.glossary.error));
+check("caret survives renumbering", /^-+\^/m.test(broken.glossary.error));
+check("backtick hint is offered", /YAML reserves "`"/.test(broken.glossary.error));
+const brokenDoc = renderDocument(brokenSrc);
+check("broken block still renders prose", /<p>text<\/p>/.test(brokenDoc.contentHtml));
+check("broken block surfaces the error", !!brokenDoc.error);
+// quoting is the fix the hint recommends, so it has to actually work
+const quoted = extractGlossary(brokenSrc.replace("example: `x`", 'example: "`x`"'));
+check("quoted backtick value parses", !quoted.glossary.error);
+check("quoted backtick value yields the term", quoted.glossary.terms.length === 1);
+
+// the other common YAML trap: ": " inside an unquoted value
+const colonSrc = brokenSrc.replace("example: `x`", "example: set `debugMode: true` first");
+const colon = extractGlossary(colonSrc);
+check("colon in value is an error", !!colon.glossary.error);
+check("colon hint explains the cause", /cannot contain ": "/.test(colon.glossary.error));
+check("colon hint suggests a block scalar", /block scalar/.test(colon.glossary.error));
+const blockScalar = extractGlossary(
+  brokenSrc.replace("  example: `x`", "  example: |\n    set `debugMode: true` first")
+);
+check("block scalar sidesteps both traps", !blockScalar.glossary.error);
+check("block scalar keeps the value", /debugMode: true/.test(blockScalar.glossary.terms[0].example));
+
 // fallback sources: a doc with no glossary block
 const table = harvestGlossaryTable(derivedSrc);
 const byTerm = (name) => table.find((t) => t.term === name);
@@ -93,6 +145,54 @@ check("no diagrams reported for plain docs", renderDocument(src).diagrams === 0)
 const risky = renderDocument('```mermaid\nflowchart TD\n  A["</pre><script>x</script>"] --> B\n```\n');
 check("diagram source is escaped", !/<script>/.test(risky.contentHtml));
 check("risky diagram still counted", risky.diagrams === 1);
+
+// Hidden terms. The store writes to a real file, so point it somewhere temporary
+// rather than at the reader's actual preferences.
+const storeFile = join(tmpdir(), `mhg-dismissed-${process.pid}.json`);
+process.env.MHG_DISMISSED_FILE = storeFile;
+rmSync(storeFile, { force: true });
+
+const hiddenDoc = renderDocument(derivedSrc, { dismissed: ["ACC"] });
+check("hidden term dropped from payload", !hiddenDoc.terms.some((t) => t.term === "ACC"));
+check("hidden count reported", hiddenDoc.hidden === 1);
+check("other terms survive", hiddenDoc.terms.length === derivedDoc.terms.length - 1);
+check("term source unchanged by hiding", hiddenDoc.termSource === "derived");
+check("matching is case-insensitive", renderDocument(derivedSrc, { dismissed: ["acc"] }).hidden === 1);
+check("unknown term hides nothing", renderDocument(derivedSrc, { dismissed: ["nope"] }).hidden === 0);
+check("no dismissals leaves the doc alone", renderDocument(derivedSrc).hidden === 0);
+// A hidden <abbr> must not fall back to the browser's own tooltip.
+check("hidden abbr keeps no title", !/<abbr[^>]*title/i.test(hiddenDoc.contentHtml));
+
+// Hiding an entry takes its aliases with it: ash2 only matched via ash1.
+const aliasHidden = renderDocument(derivedSrc, { dismissed: ["ash1"] });
+check("alias goes with its entry", !aliasHidden.terms.some((t) => t.aliases.includes("ash2")));
+
+const { kept, hidden: hiddenTerms } = partitionDismissed(
+  [{ term: "Nomad" }, { term: "ACC" }],
+  ["nomad"]
+);
+check("partition keeps the rest", kept.length === 1 && kept[0].term === "ACC");
+check("partition returns what it hid", hiddenTerms.length === 1 && hiddenTerms[0].term === "Nomad");
+
+check("store starts empty", readDismissedTerms().length === 0);
+addDismissed("Nomad", "/tmp/doc.md");
+check("store persists a term", readDismissedTerms().join() === "Nomad");
+check("store records where it came from", readDismissed()[0].from === "/tmp/doc.md");
+check("store timestamps the entry", !!Date.parse(readDismissed()[0].dismissedAt));
+addDismissed("nomad");
+check("re-hiding does not duplicate", readDismissedTerms().join() === "nomad");
+addDismissed("Airflow");
+check("entries are sorted", readDismissedTerms().join() === "Airflow,nomad");
+removeDismissed("NOMAD");
+check("restore is case-insensitive", readDismissedTerms().join() === "Airflow");
+
+// The file is meant to be hand-editable, so a bare array has to work too.
+writeFileSync(storeFile, '["Kafka", "Envoy"]', "utf8");
+check("bare string array is accepted", readDismissedTerms().join() === "Kafka,Envoy");
+writeFileSync(storeFile, "{ not json", "utf8");
+check("unreadable file degrades to empty", readDismissedTerms().length === 0);
+rmSync(storeFile, { force: true });
+check("missing file degrades to empty", readDismissedTerms().length === 0);
 
 console.log(failures === 0 ? "\nParser/render checks passed." : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
