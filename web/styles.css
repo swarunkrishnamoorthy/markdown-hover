@@ -149,10 +149,15 @@ body {
 
 .mhg-content h1,
 .mhg-content h2,
-.mhg-content h3 {
+.mhg-content h3,
+.mhg-content h4,
+.mhg-content h5,
+.mhg-content h6 {
   line-height: 1.25;
   margin-top: 1.6em;
   margin-bottom: 0.6em;
+  /* Jumping to an anchor must clear the sticky topbar. */
+  scroll-margin-top: 72px;
 }
 .mhg-content h1 {
   font-size: 1.9rem;

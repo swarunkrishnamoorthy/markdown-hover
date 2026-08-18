@@ -1,7 +1,7 @@
 // Node-facing barrel: bundled to dist/core.node.mjs for scripts and tests.
 export { extractGlossary, parseGlossaryBody, buildTermIndex } from "./glossary";
 export { deriveTerms, harvestAbbrTags, harvestGlossaryTable } from "./derive-terms";
-export { renderDocument } from "./render";
+export { renderDocument, slugify } from "./render";
 export { partitionDismissed, dismissKey } from "./dismissed";
 export {
   dismissedFilePath,

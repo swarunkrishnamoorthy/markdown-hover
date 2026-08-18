@@ -183,6 +183,24 @@ Notes:
   original source rather than swallowing it.
 - Diagrams follow the light/dark colour scheme and redraw when it changes.
 
+## Links between documents
+
+Relative links are written for a file tree, not for a web server, so
+`[guide](01-guide.md)` in a doc would otherwise send the browser to
+`localhost:4321/01-guide.md`. The viewer resolves them against the directory of
+the document you are reading and points them back at itself, so a folder of docs
+browses like a small site.
+
+- Markdown files open in the viewer. Following one swaps the content in place,
+  and Back returns to the previous document.
+- A link to a folder opens its `README.md` or `index.md`.
+- Anything else — images, PDFs, external URLs, `mailto:` — is left alone.
+- Cmd-click, middle-click and **Open in new tab** still work, because the `href`
+  is rewritten rather than merely intercepted.
+
+Headings get GitHub-compatible ids, so a table of contents written as
+`[Read this first](#read-this-first)` jumps to the right section.
+
 ## How it works
 
 - `src/glossary.ts` + `src/term-index.ts` — parse the embedded glossary and build
@@ -198,6 +216,8 @@ Notes:
   hover cards.
 - `src/browser/mermaid-ui.ts` — lazy-load Mermaid, draw the placeholders, and run
   the full-screen zoom/pan viewer. Bundled with the above to `web/dist/app.js`.
+- `src/browser/doc-links.ts` — resolve relative links against the document's own
+  directory so they open in the viewer.
 - `scripts/serve.mjs` — dev server: renders on request, serves the viewer, pushes
   live-reload events over SSE. It re-imports the renderer whenever
   `dist/core.node.mjs` changes, so `npm run watch` and `npm run serve` can run

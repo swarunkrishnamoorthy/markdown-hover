@@ -1,5 +1,6 @@
 import { mountGlossary, UiTerm, UiOptions } from "./glossary-ui";
 import { renderDiagrams } from "./mermaid-ui";
+import { rewriteDocLinks } from "./doc-links";
 
 interface DocData {
   contentHtml: string;
@@ -216,6 +217,11 @@ function renderDoc(data: DocData) {
   if (data.error) {
     container.prepend(errorBlock(data.error));
   }
+  // A standalone export is a single file with no viewer behind it, so its links
+  // stay exactly as the author wrote them.
+  if (hasServer && data.path) {
+    rewriteDocLinks(container, data.path);
+  }
   mountGlossary(container, data.terms || [], {
     ...(data.options || {}),
     onDismiss: hasServer ? (term) => void dismissTerm(term) : undefined,
@@ -258,9 +264,28 @@ function setupLiveReload(p: string) {
   }
 }
 
+function scrollToAnchor(hash: string): boolean {
+  const raw = hash.replace(/^#/, "");
+  if (!raw) {
+    return false;
+  }
+  let id = raw;
+  try {
+    id = decodeURIComponent(raw);
+  } catch {
+    /* a malformed escape is still a usable literal id */
+  }
+  const target = document.getElementById(id) || document.getElementById(raw);
+  if (!target) {
+    return false;
+  }
+  target.scrollIntoView();
+  return true;
+}
+
 async function loadPath(
   rawPath: string,
-  opts: { push?: boolean; silent?: boolean } = {}
+  opts: { push?: boolean; silent?: boolean; hash?: string } = {}
 ) {
   const p = rawPath.trim();
   if (!p) {
@@ -301,7 +326,12 @@ async function loadPath(
   }
 
   renderDoc(data);
-  window.scrollTo(0, scrollY);
+  // A live-reload keeps your place; anything else honours the anchor if there is
+  // one, so a link into a section lands on that section.
+  const anchor = opts.hash || (opts.silent ? "" : location.hash);
+  if (!anchor || !scrollToAnchor(anchor)) {
+    window.scrollTo(0, scrollY);
+  }
 
   const count = (data.terms || []).length;
   const parts = [data.filename || resolved, `${count} term${count === 1 ? "" : "s"}`];
@@ -323,7 +353,7 @@ async function loadPath(
   saveRecent(resolved);
 
   if (opts.push !== false) {
-    const q = "?path=" + encodeURIComponent(resolved);
+    const q = "?path=" + encodeURIComponent(resolved) + (opts.hash || "");
     history.pushState({ path: resolved }, "", q);
   }
   setupLiveReload(resolved);
@@ -343,6 +373,21 @@ function wireBar() {
     if (p) {
       void loadPath(p, { push: false });
     }
+  });
+
+  // Following a link to a sibling document swaps the content in place. The href
+  // is already correct, so modified clicks fall through to the browser and open
+  // a real tab or window.
+  container?.addEventListener("click", (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+      return;
+    }
+    const link = (e.target as Element | null)?.closest?.("a[data-mhg-doc]");
+    if (!(link instanceof HTMLAnchorElement) || (link.target && link.target !== "_self")) {
+      return;
+    }
+    e.preventDefault();
+    void loadPath(link.dataset.mhgDoc || "", { push: true, hash: link.hash });
   });
 
   if (hiddenBtn) {

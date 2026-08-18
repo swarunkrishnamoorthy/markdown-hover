@@ -47,6 +47,49 @@ function installMermaidFence(md: MarkdownIt): () => number {
   return () => count;
 }
 
+/**
+ * GitHub's heading slug: lowercase, drop anything that is not a word character,
+ * hyphen or space, then one hyphen per remaining space. Runs of spaces are kept
+ * as runs, which is why a heading with an em dash slugs to a double hyphen.
+ */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\- ]+/g, "")
+    .trim()
+    .replace(/ /g, "-");
+}
+
+/**
+ * Give headings ids so in-document links work. Authors write these anchors to
+ * match GitHub, so the slugs have to agree with it rather than be merely unique.
+ */
+function installHeadingIds(md: MarkdownIt): void {
+  const fallback = md.renderer.rules.heading_open;
+  const seen = new Map<string, number>();
+  md.renderer.rules.heading_open = (tokens, idx, options, env, self) => {
+    const inline = tokens[idx + 1];
+    if (inline && inline.type === "inline") {
+      // Emphasis and link markup are structure, not part of the visible text.
+      const text = inline.children
+        ? inline.children
+            .filter((t) => t.type === "text" || t.type === "code_inline")
+            .map((t) => t.content)
+            .join("")
+        : inline.content;
+      const base = slugify(text);
+      if (base) {
+        const count = seen.get(base) || 0;
+        seen.set(base, count + 1);
+        tokens[idx].attrSet("id", count ? `${base}-${count}` : base);
+      }
+    }
+    return fallback
+      ? fallback(tokens, idx, options, env, self)
+      : self.renderToken(tokens, idx, options);
+  };
+}
+
 export interface PayloadTerm {
   term: string;
   aliases: string[];
@@ -102,6 +145,7 @@ export function renderDocument(src: string, options: RenderOptions = {}): Render
 
   const contentMd = new MarkdownIt({ html: true, linkify: true, typographer: false });
   const diagramCount = installMermaidFence(contentMd);
+  installHeadingIds(contentMd);
   let contentHtml = contentMd.render(strippedSrc);
 
   // Hidden terms are stripped too. Leaving their `title` in place would swap our

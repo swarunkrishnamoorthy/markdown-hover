@@ -7,6 +7,7 @@ import {
   extractGlossary,
   buildTermIndex,
   renderDocument,
+  slugify,
   harvestGlossaryTable,
   harvestAbbrTags,
   partitionDismissed,
@@ -50,7 +51,7 @@ check("matches longest phrase", found.has("state assertions per test"));
 
 // render
 const doc = renderDocument(src);
-check("content rendered", /<h1>/.test(doc.contentHtml));
+check("content rendered", /<h1\b/.test(doc.contentHtml));
 check("glossary comment removed", !doc.contentHtml.includes("<!-- glossary"));
 check("terms payload present", doc.terms.length >= 5);
 check("definition rendered to HTML", /<p>/.test(doc.terms[0].defHtml));
@@ -103,6 +104,27 @@ const blockScalar = extractGlossary(
 );
 check("block scalar sidesteps both traps", !blockScalar.glossary.error);
 check("block scalar keeps the value", /debugMode: true/.test(blockScalar.glossary.terms[0].example));
+
+// heading ids, so in-document anchors resolve. Authors write these to match
+// GitHub, so the slugs are checked against anchors from real documents.
+check("plain heading slug", slugify("Read this first") === "read-this-first");
+check("numbering punctuation is dropped", slugify("0. Read this first") === "0-read-this-first");
+check("comma leaves one hyphen", slugify("Your rotation, and who you escalate to") === "your-rotation-and-who-you-escalate-to");
+// An em dash is removed but its two spaces are not, which is why GitHub emits "--".
+check(
+  "em dash becomes a double hyphen",
+  slugify("1.2 Category A — Transaction Records overload (81 alerts, 52%)") ===
+    "12-category-a--transaction-records-overload-81-alerts-52"
+);
+check("colon is dropped", slugify("3.2 Batch: the Airflow DAG chain") === "32-batch-the-airflow-dag-chain");
+const headed = renderDocument("# One\n\n## Two Words\n\n### `code` heading\n");
+check("h1 gets an id", /<h1 id="one">/.test(headed.contentHtml));
+check("h2 slug joins words", /<h2 id="two-words">/.test(headed.contentHtml));
+check("code spans count as heading text", /<h3 id="code-heading">/.test(headed.contentHtml));
+const dupes = renderDocument("## Notes\n\n## Notes\n\n## Notes\n").contentHtml;
+check("first duplicate heading keeps the bare slug", /<h2 id="notes">/.test(dupes));
+check("later duplicates are suffixed", /<h2 id="notes-1">/.test(dupes) && /<h2 id="notes-2">/.test(dupes));
+check("headings with no slug are left alone", /<h2>!!!<\/h2>/.test(renderDocument("## !!!\n").contentHtml));
 
 // fallback sources: a doc with no glossary block
 const table = harvestGlossaryTable(derivedSrc);

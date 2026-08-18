@@ -103,8 +103,25 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+/** Docs link to a folder expecting its index, the way a repository browser opens one. */
+async function indexFileIn(dir) {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const wanted of ["readme.md", "index.md"]) {
+    const hit = entries.find((e) => e.isFile() && e.name.toLowerCase() === wanted);
+    if (hit) {
+      return path.join(dir, hit.name);
+    }
+  }
+  return null;
+}
+
 async function renderPath(rawPath) {
-  const resolved = expandPath(rawPath);
+  let resolved = expandPath(rawPath);
   let info;
   try {
     info = await stat(resolved);
@@ -112,7 +129,16 @@ async function renderPath(rawPath) {
     return { error: `File not found: ${resolved}`, contentHtml: "", terms: [], path: resolved };
   }
   if (info.isDirectory()) {
-    return { error: `Path is a directory: ${resolved}`, contentHtml: "", terms: [], path: resolved };
+    const index = await indexFileIn(resolved);
+    if (!index) {
+      return {
+        error: `No README.md or index.md in ${resolved}`,
+        contentHtml: "",
+        terms: [],
+        path: resolved,
+      };
+    }
+    resolved = index;
   }
   const src = await readFile(resolved, "utf8");
   const { renderDocument, readDismissedTerms } = await loadCore();

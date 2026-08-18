@@ -48,7 +48,7 @@ const window = await mount(src, "sample.md");
 const doc = window.document;
 const terms = doc.querySelectorAll(".mhg-term");
 check("topbar hidden in standalone", doc.querySelector(".mhg-topbar").style.display === "none");
-check("content injected", /<h1>/.test(doc.getElementById("mhg-content").innerHTML));
+check("content injected", /<h1\b/.test(doc.getElementById("mhg-content").innerHTML));
 check("terms underlined (>=5)", terms.length >= 5);
 
 const multi = Array.from(terms).find(
@@ -178,13 +178,14 @@ function jsonResponse(body) {
   return Promise.resolve({ ok: true, status: 200, json: async () => body });
 }
 
-async function mountServed(markdown, filename) {
+async function mountServed(markdown, filename, dir = "/tmp") {
   const dismissed = [];
   const posts = [];
+  const rendered = [];
   const dom = new JSDOM(PAGE, {
     runScripts: "outside-only",
     pretendToBeVisual: true,
-    url: `http://localhost/?path=/tmp/${filename}`,
+    url: `http://localhost/?path=${dir}/${filename}`,
   });
   const { window } = dom;
   window.console = console;
@@ -193,10 +194,13 @@ async function mountServed(markdown, filename) {
     const url = new URL(String(input), "http://localhost");
     const entries = () => dismissed.map((term) => ({ term }));
     if (url.pathname === "/api/render") {
+      // The server echoes back the path it resolved, so the stub does too.
+      const requested = url.searchParams.get("path") || `${dir}/${filename}`;
+      rendered.push(requested);
       return jsonResponse({
         ...renderDocument(markdown, { dismissed }),
-        path: `/tmp/${filename}`,
-        filename,
+        path: requested,
+        filename: requested.slice(requested.lastIndexOf("/") + 1),
         options: { matchAllOccurrences: true, caseSensitive: false },
       });
     }
@@ -218,7 +222,7 @@ async function mountServed(markdown, filename) {
   };
   window.eval(appJs);
   await new Promise((r) => setTimeout(r, 60));
-  return { window, posts, dismissed };
+  return { window, posts, dismissed, rendered };
 }
 
 const hideMd = [
@@ -308,6 +312,72 @@ check("prose still renders alongside the error", /Body text/.test(bad.window.doc
 check(
   "status blames the parse, not a missing block",
   /failed to parse/.test(bad.window.document.querySelector("#mhg-status").textContent)
+);
+
+// Relative links are written for a file tree. Left alone the browser resolves
+// them against the origin and asks the viewer's server for a file it does not
+// serve, so every viewable one is pointed back into the viewer.
+const linksMd = [
+  "# Links",
+  "",
+  "- [sibling](01-guide.md)",
+  "- [up and over](../other/notes.md)",
+  "- [absolute](/var/docs/spec.md)",
+  "- [a folder](../sibling-project/)",
+  "- [with anchor](02-tables.md#engines)",
+  "- [spaces](my%20notes.md)",
+  "- [external](https://example.com/x.md)",
+  "- [mail](mailto:me@example.com)",
+  "- [in page](#links)",
+  "- [an image](chart.png)",
+  "",
+].join("\n");
+const linked = await mountServed(linksMd, "README.md", "/docs/proj");
+const hrefOf = (text) =>
+  Array.from(linked.window.document.querySelectorAll("#mhg-content a")).find(
+    (a) => a.textContent === text
+  );
+
+check("sibling link resolves next to the doc", hrefOf("sibling").getAttribute("href") === "/?path=%2Fdocs%2Fproj%2F01-guide.md");
+check("parent segments are resolved", hrefOf("up and over").getAttribute("href") === "/?path=%2Fdocs%2Fother%2Fnotes.md");
+check("absolute path is left absolute", hrefOf("absolute").getAttribute("href") === "/?path=%2Fvar%2Fdocs%2Fspec.md");
+check("directory link is rewritten", hrefOf("a folder").getAttribute("href") === "/?path=%2Fdocs%2Fsibling-project");
+check("anchor is carried across", hrefOf("with anchor").getAttribute("href") === "/?path=%2Fdocs%2Fproj%2F02-tables.md#engines");
+check("percent-encoded names decode to real paths", hrefOf("spaces").dataset.mhgDoc === "/docs/proj/my notes.md");
+check("external links are untouched", hrefOf("external").getAttribute("href") === "https://example.com/x.md");
+check("mailto is untouched", hrefOf("mail").getAttribute("href") === "mailto:me@example.com");
+check("in-page anchors are untouched", hrefOf("in page").getAttribute("href") === "#links");
+check("non-document files are left for the browser", hrefOf("an image").getAttribute("href") === "chart.png");
+check("only rewritten links are marked", !hrefOf("an image").hasAttribute("data-mhg-doc"));
+
+// Following one swaps the document in place rather than reloading the page.
+const before = linked.rendered.length;
+hrefOf("sibling").dispatchEvent(
+  new linked.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+);
+await new Promise((r) => setTimeout(r, 40));
+check("clicking a doc link loads it", linked.rendered[linked.rendered.length - 1] === "/docs/proj/01-guide.md");
+check("clicking issues exactly one render", linked.rendered.length === before + 1);
+check("history follows the link", linked.window.location.search === "?path=%2Fdocs%2Fproj%2F01-guide.md");
+
+// A modified click is the reader asking for a new tab, so it must reach the browser.
+const openInTab = new linked.window.MouseEvent("click", {
+  bubbles: true,
+  cancelable: true,
+  button: 0,
+  metaKey: true,
+});
+hrefOf("sibling")?.dispatchEvent(openInTab);
+await new Promise((r) => setTimeout(r, 20));
+check("cmd-click is left to the browser", !openInTab.defaultPrevented);
+
+// The standalone export has no viewer to link into, so links stay as written.
+const exportedLinks = await mount(linksMd, "README.md");
+check(
+  "export leaves relative links alone",
+  Array.from(exportedLinks.document.querySelectorAll("#mhg-content a")).every(
+    (a) => !a.hasAttribute("data-mhg-doc")
+  )
 );
 
 console.log(failures === 0 ? "\nDOM checks passed." : `\n${failures} DOM check(s) failed.`);
