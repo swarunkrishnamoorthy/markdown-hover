@@ -201,6 +201,12 @@ browses like a small site.
 Headings get GitHub-compatible ids, so a table of contents written as
 `[Read this first](#read-this-first)` jumps to the right section.
 
+## Copying a code block
+
+Every fenced or indented code block gets a **Copy** button in the top-right
+corner. It copies the whole block, including a trailing newline if the fence
+had one. Diagram source and parse-error excerpts are left alone.
+
 ## How it works
 
 - `src/glossary.ts` + `src/term-index.ts` — parse the embedded glossary and build
@@ -218,6 +224,7 @@ Headings get GitHub-compatible ids, so a table of contents written as
   the full-screen zoom/pan viewer. Bundled with the above to `web/dist/app.js`.
 - `src/browser/doc-links.ts` — resolve relative links against the document's own
   directory so they open in the viewer.
+- `src/browser/copy-ui.ts` — add a Copy button to each rendered code block.
 - `scripts/serve.mjs` — dev server: renders on request, serves the viewer, pushes
   live-reload events over SSE. It re-imports the renderer whenever
   `dist/core.node.mjs` changes, so `npm run watch` and `npm run serve` can run

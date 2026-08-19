@@ -197,6 +197,42 @@ body {
   padding: 14px 16px;
   overflow: auto;
 }
+
+/* Copy sits on the wrapper so a sideways scroll does not take the button with it. */
+.mhg-code {
+  position: relative;
+}
+.mhg-code pre {
+  padding-right: 64px;
+}
+.mhg-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.12s ease;
+}
+.mhg-code:hover .mhg-copy,
+.mhg-copy:focus {
+  opacity: 1;
+}
+.mhg-copy:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.mhg-copy:disabled {
+  cursor: default;
+  opacity: 1;
+  color: var(--fg);
+}
 .mhg-content pre code {
   background: none;
   padding: 0;

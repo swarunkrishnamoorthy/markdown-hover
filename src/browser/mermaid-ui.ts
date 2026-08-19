@@ -333,9 +333,9 @@ function openOverlay(svg: SVGElement) {
   const stage = document.createElement("div");
   stage.className = "mhg-zoom-stage";
 
-  // Size the clone explicitly. Mermaid caps its SVG with an inline `max-width`,
-  // and an SVG with no dimensions inside an auto-sized flex item resolves to
-  // zero height — an overlay that opens onto nothing.
+  // Mermaid caps its SVG with an inline `max-width`, and an SVG with no
+  // dimensions inside an auto-sized flex item resolves to zero height. Give the
+  // clone an explicit intrinsic size and a viewBox so it can scale as vector.
   const bounds = svg.getBoundingClientRect();
   const viewBox = (svg.getAttribute("viewBox") || "").split(/[\s,]+/).map(Number);
   const natural = viewBox.length === 4 && viewBox[2] > 0 ? { w: viewBox[2], h: viewBox[3] } : null;
@@ -345,8 +345,10 @@ function openOverlay(svg: SVGElement) {
   const clone = svg.cloneNode(true) as SVGElement;
   clone.setAttribute("width", String(width));
   clone.setAttribute("height", String(height));
-  clone.style.width = `${width}px`;
-  clone.style.height = `${height}px`;
+  if (!clone.getAttribute("viewBox")) {
+    clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  }
+  clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
   clone.style.maxWidth = "none";
   clone.style.maxHeight = "none";
   stage.appendChild(clone);
@@ -361,8 +363,16 @@ function openOverlay(svg: SVGElement) {
   let scale = initialScale;
   let x = 0;
   let y = 0;
+  // Zoom by resizing the SVG, not by CSS-scaling it. A `transform: scale()` on a
+  // promoted layer (and on mermaid's foreignObject labels) rasterises once and
+  // stretches that bitmap, which is what turned a zoomed diagram blurry. Growing
+  // the element's own width/height re-renders the vector at the target size, so
+  // it stays sharp at any zoom. Panning still uses translate, which is cheap and
+  // never rasterises.
   const apply = () => {
-    stage.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    clone.style.width = `${width * scale}px`;
+    clone.style.height = `${height * scale}px`;
+    stage.style.transform = `translate(${x}px, ${y}px)`;
   };
   const zoomBy = (factor: number) => {
     scale = Math.min(12, Math.max(0.2, scale * factor));

@@ -108,6 +108,8 @@ check(
 );
 check("no glossary terms wrapped inside a diagram", !sDoc.querySelector(".mhg-mermaid .mhg-term"));
 check("terms outside diagrams still wrapped", sDoc.querySelectorAll(".mhg-term").length >= 5);
+check("python fence gets a copy button", !!sDoc.querySelector(".mhg-code .mhg-copy"));
+check("mermaid source is not treated as a code block", !sDoc.querySelector(".mhg-mermaid .mhg-copy"));
 
 // Diagram drawing, with mermaid stubbed out: jsdom cannot lay out SVG, but the
 // wiring around mermaid is exactly where the bugs were.
@@ -164,6 +166,14 @@ check(
     "−,+,Reset,Close"
 );
 check("page scroll locked while open", mDoc.body.classList.contains("mhg-zoom-open"));
+
+// Zooming must resize the SVG itself, not CSS-scale a rasterised layer, or the
+// vector goes blurry the moment you zoom in.
+const stage = zoom.querySelector(".mhg-zoom-stage");
+const zoomIn = [...zoom.querySelectorAll(".mhg-zoom-bar button")].find((b) => b.textContent === "+");
+zoomIn.dispatchEvent(new mWindow.MouseEvent("click", { bubbles: true }));
+check("zoom grows the svg's own box", clone.style.width === "500px" && clone.style.height === "250px");
+check("zoom never css-scales the layer", !/scale\(/.test(stage.style.transform));
 
 [...zoom.querySelectorAll("button")].find((b) => b.textContent === "Close").dispatchEvent(
   new mWindow.MouseEvent("click", { bubbles: true })
@@ -313,6 +323,7 @@ check(
   "status blames the parse, not a missing block",
   /failed to parse/.test(bad.window.document.querySelector("#mhg-status").textContent)
 );
+check("parse-error excerpt has no copy button", !bad.window.document.querySelector(".mhg-error .mhg-copy, .mhg-code .mhg-error"));
 
 // Relative links are written for a file tree. Left alone the browser resolves
 // them against the origin and asks the viewer's server for a file it does not
@@ -379,6 +390,61 @@ check(
     (a) => !a.hasAttribute("data-mhg-doc")
   )
 );
+
+// A code block gets a Copy button that writes the whole fence, not a selection.
+const copyMd = [
+  "# SQL",
+  "",
+  "Inline `journal_raw` is not a block.",
+  "",
+  "```sql",
+  "CREATE TABLE t (id String);",
+  "```",
+  "",
+  "```",
+  "plain fence",
+  "```",
+  "",
+].join("\n");
+const copied = [];
+const copyWin = await mount(copyMd, "ddl.md", (w) => {
+  w.navigator.clipboard = {
+    writeText: (text) => {
+      copied.push(text);
+      return Promise.resolve();
+    },
+  };
+});
+const copyButtons = [...copyWin.document.querySelectorAll(".mhg-copy")];
+check("one button per fence", copyButtons.length === 2);
+check("inline code has no copy button", !copyWin.document.querySelector("p .mhg-copy"));
+
+copyButtons[0].dispatchEvent(new copyWin.MouseEvent("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 20));
+check("copy writes the fence text", copied[0] === "CREATE TABLE t (id String);\n");
+check("button confirms the copy", copyButtons[0].textContent === "Copied");
+
+copyButtons[1].dispatchEvent(new copyWin.MouseEvent("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 20));
+check("unlabelled fence copies too", copied[1] === "plain fence\n");
+
+// The fallback path is what a file:// export has to use.
+const fallback = [];
+const execWin = await mount("```\nfallback\n```\n", "f.md", (w) => {
+  delete w.navigator.clipboard;
+  w.document.execCommand = (cmd) => {
+    if (cmd === "copy") {
+      fallback.push(w.document.querySelector("textarea")?.value);
+      return true;
+    }
+    return false;
+  };
+});
+execWin.document.querySelector(".mhg-copy").dispatchEvent(
+  new execWin.MouseEvent("click", { bubbles: true })
+);
+await new Promise((r) => setTimeout(r, 20));
+check("clipboard fallback writes the fence", fallback[0] === "fallback\n");
 
 console.log(failures === 0 ? "\nDOM checks passed." : `\n${failures} DOM check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

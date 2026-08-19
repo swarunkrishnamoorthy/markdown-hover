@@ -1,6 +1,7 @@
 import { mountGlossary, UiTerm, UiOptions } from "./glossary-ui";
 import { renderDiagrams } from "./mermaid-ui";
 import { rewriteDocLinks } from "./doc-links";
+import { mountCopyButtons } from "./copy-ui";
 
 interface DocData {
   contentHtml: string;
@@ -226,6 +227,7 @@ function renderDoc(data: DocData) {
     ...(data.options || {}),
     onDismiss: hasServer ? (term) => void dismissTerm(term) : undefined,
   });
+  mountCopyButtons(container);
   // Diagrams draw asynchronously; the prose is already usable before they land.
   void renderDiagrams(container);
 }
