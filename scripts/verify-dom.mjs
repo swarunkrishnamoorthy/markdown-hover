@@ -20,7 +20,8 @@ function check(label, cond) {
 }
 
 const PAGE = `<!DOCTYPE html><html><body>
-    <header class="mhg-topbar"><input id="mhg-path"/><span id="mhg-status"></span>
+    <header class="mhg-topbar"><a href="/" id="mhg-brand" class="mhg-brand">Glossary Viewer</a>
+    <input id="mhg-path"/><span id="mhg-status"></span>
     <button id="mhg-hidden" hidden>Hidden 0</button><datalist id="mhg-recents"></datalist></header>
     <main id="mhg-content" class="mhg-content"></main>
   </body></html>`;
@@ -445,6 +446,86 @@ execWin.document.querySelector(".mhg-copy").dispatchEvent(
 );
 await new Promise((r) => setTimeout(r, 20));
 check("clipboard fallback writes the fence", fallback[0] === "fallback\n");
+
+// Home page: the brand title opens a listing of recent files instead of a doc.
+async function mountHome({ recents = [], artifacts = [] } = {}) {
+  const dom = new JSDOM(PAGE, {
+    runScripts: "outside-only",
+    pretendToBeVisual: true,
+    url: "http://localhost/",
+  });
+  const { window } = dom;
+  window.console = console;
+  window.scrollTo = () => {};
+  window.localStorage.setItem("mhg-recents", JSON.stringify(recents));
+  const rendered = [];
+  window.fetch = (input) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname === "/api/config") {
+      return jsonResponse({ home: "/Users/me", defaultPath: null });
+    }
+    if (url.pathname === "/api/recent-artifacts") {
+      return jsonResponse({ home: "/Users/me", dir: "/Users/me/agent-artifacts", files: artifacts });
+    }
+    if (url.pathname === "/api/dismissed") {
+      return jsonResponse({ terms: [] });
+    }
+    if (url.pathname === "/api/render") {
+      const p = url.searchParams.get("path");
+      rendered.push(p);
+      return jsonResponse({ ...renderDocument(`# ${p}`), path: p, filename: p });
+    }
+    return jsonResponse({});
+  };
+  window.eval(appJs);
+  await new Promise((r) => setTimeout(r, 60));
+  return { window, rendered };
+}
+
+const now = Date.now();
+const homeView = await mountHome({
+  recents: ["/Users/me/agent-artifacts/a.md", "/Users/me/notes/b.md"],
+  artifacts: [
+    { path: "/Users/me/agent-artifacts/wallets/README.md", mtimeMs: now - 3_600_000 },
+    { path: "/Users/me/agent-artifacts/x/plan.md", mtimeMs: now - 90_000 },
+  ],
+});
+const homeDoc = homeView.window.document;
+check("home page shown when no path", !!homeDoc.querySelector(".mhg-home"));
+const homeSections = homeDoc.querySelectorAll(".mhg-home-section");
+check("home has two sections", homeSections.length === 2);
+
+const viewedLinks = homeSections[0].querySelectorAll("a[data-mhg-doc]");
+check("recently viewed lists the recents", viewedLinks.length === 2);
+check("recent link targets the file", viewedLinks[0].dataset.mhgDoc === "/Users/me/agent-artifacts/a.md");
+check("recent link shows the filename", viewedLinks[0].querySelector(".mhg-home-name").textContent === "a.md");
+check("home path is tildified", viewedLinks[0].querySelector(".mhg-home-meta").textContent === "~/agent-artifacts");
+
+const artifactLinks = homeSections[1].querySelectorAll("a[data-mhg-doc]");
+check("artifacts section lists modified files", artifactLinks.length === 2);
+check("artifact shows the filename", artifactLinks[0].querySelector(".mhg-home-name").textContent === "README.md");
+check("artifact shows a relative time", /ago|\d/.test(artifactLinks[0].querySelector(".mhg-home-time").textContent));
+
+// Clicking a listing opens the doc in place, through the same handler as doc links.
+artifactLinks[0].dispatchEvent(
+  new homeView.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+);
+await new Promise((r) => setTimeout(r, 30));
+check("clicking a listing opens the doc", homeView.rendered.at(-1) === "/Users/me/agent-artifacts/wallets/README.md");
+check("opening a listing leaves the home page", !homeDoc.querySelector(".mhg-home"));
+
+// The brand title returns to the home page from an open doc.
+homeDoc.getElementById("mhg-brand").dispatchEvent(
+  new homeView.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+);
+await new Promise((r) => setTimeout(r, 30));
+check("brand returns to the home page", !!homeDoc.querySelector(".mhg-home"));
+
+// With nothing viewed yet, the recents section says so rather than sitting empty.
+const emptyHome = await mountHome({ recents: [], artifacts: [] });
+const emptySections = emptyHome.window.document.querySelectorAll(".mhg-home-section");
+check("empty recents shows a hint", /show up here/.test(emptySections[0].textContent));
+check("empty artifacts says none found", /No Markdown files/.test(emptySections[1].textContent));
 
 console.log(failures === 0 ? "\nDOM checks passed." : `\n${failures} DOM check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -182,7 +182,17 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === "/api/config") {
-    return sendJson(res, 200, { defaultPath, cwd: process.cwd() });
+    return sendJson(res, 200, { defaultPath, cwd: process.cwd(), home: os.homedir() });
+  }
+
+  if (pathname === "/api/recent-artifacts") {
+    const dir = path.join(os.homedir(), "agent-artifacts");
+    try {
+      const files = await recentMarkdown(dir, 25);
+      return sendJson(res, 200, { dir, home: os.homedir(), files });
+    } catch (err) {
+      return sendJson(res, 500, { error: String(err), files: [] });
+    }
   }
 
   if (pathname === "/api/dismissed") {
@@ -269,6 +279,45 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404).end("Not found");
 });
+
+// Directories that never hold docs worth listing, and whose contents can be huge.
+const ARTIFACT_SKIP = new Set(["node_modules", ".git"]);
+
+async function collectMarkdown(dir, out, budget) {
+  if (out.length >= budget) {
+    return;
+  }
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (out.length >= budget) {
+      return;
+    }
+    // Skip dotfiles/dirs (covers .git) and known heavy trees.
+    if (entry.name.startsWith(".") || ARTIFACT_SKIP.has(entry.name)) {
+      continue;
+    }
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectMarkdown(full, out, budget);
+    } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
+      out.push({ path: full, name: entry.name, mtimeMs: await mtimeOf(full) });
+    }
+  }
+}
+
+/** The `limit` most recently modified Markdown files under `dir`, newest first. */
+async function recentMarkdown(dir, limit) {
+  const out = [];
+  // Cap the scan so a giant tree cannot stall the request.
+  await collectMarkdown(dir, out, 5000);
+  out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return out.slice(0, limit);
+}
 
 /** Newest mtime under a directory, so we can tell if a build is behind its sources. */
 async function newestMtime(dir) {

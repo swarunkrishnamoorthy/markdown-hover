@@ -28,8 +28,10 @@ declare global {
 }
 
 const RECENTS_KEY = "mhg-recents";
-const RECENTS_MAX = 15;
+const RECENTS_MAX = 25;
 
+/** Learned from the server so absolute paths can be shown as ~/…. */
+let homeDir = "";
 let container: HTMLElement | null = null;
 let pathInput: HTMLInputElement | null = null;
 let statusEl: HTMLElement | null = null;
@@ -232,13 +234,155 @@ function renderDoc(data: DocData) {
   void renderDiagrams(container);
 }
 
-function showEmpty() {
+function baseName(p: string): string {
+  const trimmed = p.replace(/\/+$/, "");
+  const at = trimmed.lastIndexOf("/");
+  return at < 0 ? trimmed : trimmed.slice(at + 1);
+}
+
+function dirName(p: string): string {
+  const trimmed = p.replace(/\/+$/, "");
+  const at = trimmed.lastIndexOf("/");
+  return at <= 0 ? "/" : trimmed.slice(0, at);
+}
+
+/** Collapse the home directory to ~ so the listing reads like a shell path. */
+function tildify(p: string): string {
+  if (homeDir && (p === homeDir || p.startsWith(homeDir + "/"))) {
+    return "~" + p.slice(homeDir.length);
+  }
+  return p;
+}
+
+function timeAgo(ms: number): string {
+  const secs = Math.max(0, (Date.now() - ms) / 1000);
+  if (secs < 45) return "just now";
+  const mins = secs / 60;
+  if (mins < 60) return `${Math.round(mins)}m ago`;
+  const hours = mins / 60;
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  const days = hours / 24;
+  if (days < 30) return `${Math.round(days)}d ago`;
+  return new Date(ms).toLocaleDateString();
+}
+
+// Home links carry data-mhg-doc so the container's delegated handler opens them
+// in place, exactly like a resolved relative link inside a document.
+function fileItem(absPath: string, when?: number): HTMLLIElement {
+  const li = document.createElement("li");
+  const a = document.createElement("a");
+  a.className = "mhg-home-link";
+  a.href = `/?path=${encodeURIComponent(absPath)}`;
+  a.dataset.mhgDoc = absPath;
+
+  const name = document.createElement("span");
+  name.className = "mhg-home-name";
+  name.textContent = baseName(absPath);
+  a.appendChild(name);
+
+  const meta = document.createElement("span");
+  meta.className = "mhg-home-meta";
+  meta.textContent = tildify(dirName(absPath));
+  a.appendChild(meta);
+
+  if (typeof when === "number") {
+    const time = document.createElement("time");
+    time.className = "mhg-home-time";
+    time.dateTime = new Date(when).toISOString();
+    time.textContent = timeAgo(when);
+    a.appendChild(time);
+  }
+
+  li.appendChild(a);
+  return li;
+}
+
+function homeSection(title: string): { section: HTMLElement; list: HTMLUListElement } {
+  const section = document.createElement("section");
+  section.className = "mhg-home-section";
+  const heading = document.createElement("h2");
+  heading.className = "mhg-home-heading";
+  heading.textContent = title;
+  const list = document.createElement("ul");
+  list.className = "mhg-home-list";
+  section.appendChild(heading);
+  section.appendChild(list);
+  return { section, list };
+}
+
+function emptyNote(list: HTMLElement, text: string) {
+  list.textContent = "";
+  const li = document.createElement("li");
+  li.className = "mhg-home-empty";
+  li.textContent = text;
+  list.appendChild(li);
+}
+
+async function showHome() {
   if (!container) {
     return;
   }
-  container.innerHTML =
-    `<div class="mhg-empty">Paste a path to a Markdown file above and press <b>Open</b>.` +
-    `<br/><br/>Add a <code>&lt;!-- glossary … --&gt;</code> block to a doc and its terms become hoverable here.</div>`;
+  setStatus("");
+  document.title = "Glossary Viewer";
+  container.textContent = "";
+
+  const home = document.createElement("div");
+  home.className = "mhg-home";
+
+  const viewed = homeSection("Recently viewed");
+  const recents = loadRecents().slice(0, RECENTS_MAX);
+  if (recents.length) {
+    for (const p of recents) {
+      viewed.list.appendChild(fileItem(p));
+    }
+  } else {
+    emptyNote(viewed.list, "Open a Markdown file and it will show up here.");
+  }
+  home.appendChild(viewed.section);
+
+  const modified = homeSection("Recently modified in agent-artifacts");
+  emptyNote(modified.list, "Loading…");
+  home.appendChild(modified.section);
+
+  container.appendChild(home);
+
+  if (!hasServer) {
+    emptyNote(modified.list, "Only available in the live viewer.");
+    return;
+  }
+  try {
+    const data = (await fetch("/api/recent-artifacts").then((r) => r.json())) as {
+      home?: string;
+      files?: { path: string; mtimeMs: number }[];
+    };
+    if (data.home) {
+      homeDir = data.home;
+    }
+    const files = data.files || [];
+    if (files.length) {
+      modified.list.textContent = "";
+      for (const f of files) {
+        modified.list.appendChild(fileItem(f.path, f.mtimeMs));
+      }
+    } else {
+      emptyNote(modified.list, "No Markdown files found in ~/agent-artifacts.");
+    }
+  } catch {
+    emptyNote(modified.list, "Could not reach the server.");
+  }
+}
+
+function goHome(push = true) {
+  currentPath = null;
+  if (pathInput) {
+    pathInput.value = "";
+  }
+  if (push) {
+    history.pushState({}, "", "/");
+  }
+  // Keep the dev bundle's hard-reload working on the home page too.
+  setupLiveReload("");
+  void showHome();
 }
 
 function setupLiveReload(p: string) {
@@ -369,11 +513,24 @@ function wireBar() {
       void loadPath(pathInput!.value, { push: true });
     });
   }
+  const brand = document.getElementById("mhg-brand");
+  brand?.addEventListener("click", (e) => {
+    const me = e as MouseEvent;
+    // Let modified clicks open the home page in a new tab like any other link.
+    if (me.button !== 0 || me.metaKey || me.ctrlKey || me.shiftKey || me.altKey) {
+      return;
+    }
+    e.preventDefault();
+    goHome(true);
+  });
+
   window.addEventListener("popstate", (e) => {
     const st = e.state as { path?: string } | null;
     const p = st?.path || new URLSearchParams(location.search).get("path");
     if (p) {
       void loadPath(p, { push: false });
+    } else {
+      goHome(false);
     }
   });
 
@@ -433,26 +590,32 @@ async function boot() {
   wireBar();
   void fetchDismissed().then(refreshHiddenButton);
 
+  // One config fetch: it carries the home dir (for ~ display) and any default file.
+  let cfg: { defaultPath?: string; home?: string } | undefined;
+  try {
+    cfg = (await fetch("/api/config").then((r) => r.json())) as {
+      defaultPath?: string;
+      home?: string;
+    };
+  } catch {
+    /* no config endpoint */
+  }
+  if (cfg?.home) {
+    homeDir = cfg.home;
+  }
+
   const fromUrl = new URLSearchParams(location.search).get("path");
   if (fromUrl) {
     await loadPath(fromUrl, { push: false });
     return;
   }
-
-  // Optional server default (e.g. started with a file argument).
-  try {
-    const cfg = (await fetch("/api/config").then((r) => r.json())) as {
-      defaultPath?: string;
-    };
-    if (cfg.defaultPath) {
-      await loadPath(cfg.defaultPath, { push: false });
-      return;
-    }
-  } catch {
-    /* no config endpoint */
+  if (cfg?.defaultPath) {
+    await loadPath(cfg.defaultPath, { push: false });
+    return;
   }
 
-  showEmpty();
+  setupLiveReload("");
+  void showHome();
 }
 
 if (document.readyState === "loading") {

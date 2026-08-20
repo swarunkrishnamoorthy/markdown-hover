@@ -201,6 +201,16 @@ browses like a small site.
 Headings get GitHub-compatible ids, so a table of contents written as
 `[Read this first](#read-this-first)` jumps to the right section.
 
+## Home page
+
+Clicking the **Glossary Viewer** title (top left) opens a home page with two
+lists:
+
+- The 25 most recently viewed files, from this browser's history.
+- The 25 most recently modified Markdown files under `~/agent-artifacts`.
+
+Either list opens a file in place. Back returns to the home page.
+
 ## Copying a code block
 
 Every fenced or indented code block gets a **Copy** button in the top-right
