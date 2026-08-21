@@ -24,6 +24,9 @@ press **Open**. The doc renders with its glossary terms hoverable. The path is
 kept in the URL (`?path=…`) so reloads and bookmarks work, recent files
 autocomplete in the box, and the view live-reloads when the file changes.
 
+`Cmd+/` (`Ctrl+/` off the Mac) jumps to the path box from anywhere on the page
+and selects what is there, so the next keystroke replaces it.
+
 Options: `npm run serve -- --port 5000`, `npm run serve -- --no-open`. You can also
 preload a file: `npm run serve -- ~/swarun/notes/plan.md`.
 

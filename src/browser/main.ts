@@ -563,6 +563,14 @@ function wireBar() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       closeHiddenPanel();
+      return;
+    }
+    // Cmd+/ (Ctrl+/ off the Mac) jumps to the path bar from anywhere on the
+    // page. The path is selected so the next keystroke replaces it.
+    if (e.key === "/" && (e.metaKey || e.ctrlKey) && !e.altKey && pathInput) {
+      e.preventDefault();
+      pathInput.focus();
+      pathInput.select();
     }
   });
 }

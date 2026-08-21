@@ -447,6 +447,31 @@ execWin.document.querySelector(".mhg-copy").dispatchEvent(
 await new Promise((r) => setTimeout(r, 20));
 check("clipboard fallback writes the fence", fallback[0] === "fallback\n");
 
+// Cmd+/ jumps to the path bar, so a doc can be swapped without reaching for the
+// mouse. A bare slash has to keep working as ordinary typing.
+const keys = await mountServed(hideMd, "keys.md");
+const keysDoc = keys.window.document;
+const keyBar = keysDoc.getElementById("mhg-path");
+const press = (init) => {
+  const e = new keys.window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+  keysDoc.dispatchEvent(e);
+  return e;
+};
+
+keyBar.blur();
+const cmdSlash = press({ key: "/", metaKey: true });
+check("cmd-slash focuses the path bar", keysDoc.activeElement === keyBar);
+check("cmd-slash is handled, not left to the browser", cmdSlash.defaultPrevented);
+
+keyBar.blur();
+press({ key: "/", ctrlKey: true });
+check("ctrl-slash focuses the path bar too", keysDoc.activeElement === keyBar);
+
+keyBar.blur();
+const bareSlash = press({ key: "/" });
+check("a bare slash does not hijack focus", keysDoc.activeElement !== keyBar);
+check("a bare slash is left alone", !bareSlash.defaultPrevented);
+
 // Home page: the brand title opens a listing of recent files instead of a doc.
 async function mountHome({ recents = [], artifacts = [] } = {}) {
   const dom = new JSDOM(PAGE, {
