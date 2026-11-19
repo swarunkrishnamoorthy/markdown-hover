@@ -552,5 +552,47 @@ const emptySections = emptyHome.window.document.querySelectorAll(".mhg-home-sect
 check("empty recents shows a hint", /show up here/.test(emptySections[0].textContent));
 check("empty artifacts says none found", /No Markdown files/.test(emptySections[1].textContent));
 
+// Tables are wrapped and get drag handles that resize one column or row.
+{
+  const md = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n";
+  const t = await mount(md, "table.md", (w) => {
+    // jsdom has no layout, so give cells a fixed measured size.
+    w.HTMLElement.prototype.getBoundingClientRect = function () {
+      return { width: 100, height: 30, left: 0, top: 0, right: 100, bottom: 30, x: 0, y: 0 };
+    };
+    w.HTMLElement.prototype.setPointerCapture = () => {};
+    w.HTMLElement.prototype.releasePointerCapture = () => {};
+  });
+  const td = t.document;
+  const table = td.querySelector(".mhg-table-wrap table");
+  check("table is wrapped for wide layout", !!table);
+  check("each header cell has a column grip", td.querySelectorAll("th .mhg-col-grip").length === 3);
+  check("each row has a row grip", td.querySelectorAll(".mhg-row-grip").length === 3);
+  const fire = (el, type, x, y) => {
+    // jsdom has no PointerEvent; a MouseEvent carries the same coordinates.
+    const ev = new t.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y });
+    ev.pointerId = 1;
+    el.dispatchEvent(ev);
+  };
+  const grip = td.querySelectorAll("th .mhg-col-grip")[1];
+  fire(grip, "pointerdown", 0, 0);
+  fire(grip, "pointermove", 60, 0);
+  fire(grip, "pointerup", 60, 0);
+  const cols = table.querySelectorAll("colgroup.mhg-cols col");
+  check("dragging a column grip resizes only that column",
+    cols[0].style.width === "100px" && cols[1].style.width === "160px" && cols[2].style.width === "100px");
+  check("table width follows the columns", table.style.width === "360px");
+  const rg = td.querySelectorAll(".mhg-row-grip")[1];
+  fire(rg, "pointerdown", 0, 0);
+  fire(rg, "pointermove", 0, 50);
+  fire(rg, "pointerup", 0, 50);
+  check("dragging a row grip sets the row height", table.rows[1].cells[0].style.height === "80px");
+  const btn = td.querySelector(".mhg-table-reset");
+  check("reset button appears after resizing", !btn.hidden);
+  btn.click();
+  check("reset restores automatic sizing",
+    !table.querySelector("colgroup.mhg-cols") && table.style.width === "" && table.rows[1].cells[0].style.height === "" && btn.hidden);
+}
+
 console.log(failures === 0 ? "\nDOM checks passed." : `\n${failures} DOM check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
