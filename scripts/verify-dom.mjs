@@ -594,5 +594,50 @@ check("empty artifacts says none found", /No Markdown files/.test(emptySections[
     !table.querySelector("colgroup.mhg-cols") && table.style.width === "" && table.rows[1].cells[0].style.height === "" && btn.hidden);
 }
 
+// A narrower-than-wrapper table is centered, so a column grip must compensate:
+// the column's right edge has to stay under the cursor while the table re-centers.
+{
+  const md = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n";
+  const t = await mount(md, "center.md", (w) => {
+    w.HTMLElement.prototype.getBoundingClientRect = function () {
+      return { width: 100, height: 30, left: 0, top: 0, right: 100, bottom: 30, x: 0, y: 0 };
+    };
+    w.HTMLElement.prototype.setPointerCapture = () => {};
+    w.HTMLElement.prototype.releasePointerCapture = () => {};
+    // The wrapper is 1000px wide; the 3 x 100px table sits centered in it.
+    Object.defineProperty(w.HTMLElement.prototype, "clientWidth", { get: () => 1000, configurable: true });
+  });
+  const td = t.document;
+  const table = td.querySelector(".mhg-table-wrap table");
+  const fire = (el, type, x) => {
+    const ev = new t.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 0 });
+    ev.pointerId = 1;
+    el.dispatchEvent(ev);
+  };
+  const left = (total) => Math.max(0, (1000 - total) / 2);
+  const widths = () => [...table.querySelectorAll("colgroup.mhg-cols col")].map((c) => parseFloat(c.style.width));
+  const edgeOfCol1 = () => {
+    const w = widths();
+    return left(w.reduce((a, b) => a + b, 0)) + w[0] + w[1];
+  };
+  const grip = td.querySelectorAll("th .mhg-col-grip")[1];
+  fire(grip, "pointerdown", 0);
+  const startEdge = left(300) + 200;
+  fire(grip, "pointermove", 60);
+  check("column edge tracks the cursor while the table re-centers", Math.abs(edgeOfCol1() - (startEdge + 60)) <= 1);
+  check("centered drag widens the column by twice the cursor move", widths()[1] === 220);
+  fire(grip, "pointermove", -20);
+  check("shrinking also keeps the edge under the cursor", Math.abs(edgeOfCol1() - (startEdge - 20)) <= 1);
+  fire(grip, "pointerup", -20);
+
+  // Once the table is wider than the wrapper there is nothing to center: 1:1.
+  const g0 = td.querySelectorAll("th .mhg-col-grip")[0];
+  fire(g0, "pointerdown", 0);
+  fire(g0, "pointermove", 900);
+  fire(g0, "pointerup", 900);
+  const w = widths();
+  check("a table wider than the wrapper is not recentered", w[0] > 900 && w.reduce((a, b) => a + b, 0) > 1000);
+}
+
 console.log(failures === 0 ? "\nDOM checks passed." : `\n${failures} DOM check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

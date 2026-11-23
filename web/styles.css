@@ -315,7 +315,7 @@ body {
 .mhg-content table {
   border-collapse: collapse;
   width: 100%;
-  margin: 0;
+  margin: 0 auto;
   font-size: 0.94em;
 }
 .mhg-content th,

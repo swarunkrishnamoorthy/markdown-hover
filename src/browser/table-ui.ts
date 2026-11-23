@@ -89,11 +89,22 @@ function addColumnGrip(
       return;
     }
     const start = parseFloat(col.style.width) || cell.getBoundingClientRect().width;
+    const total0 = cols.reduce((sum, c) => sum + (parseFloat(c.style.width) || 0), 0);
+    const room = (table.parentElement as HTMLElement).clientWidth;
+    // A table narrower than its wrapper is centered, so widening a column by d
+    // moves that column's right edge by only d/2 (the left edge moves back d/2).
+    // Solve for the d that keeps the edge under the cursor.
+    const left = (total: number) => Math.max(0, (room - total) / 2);
     drag(
       grip,
       e,
       (dx) => {
-        col.style.width = `${Math.max(MIN_COL, Math.round(start + dx))}px`;
+        let delta = dx;
+        for (let i = 0; i < 8; i++) {
+          const edgeShift = delta + left(total0 + delta) - left(total0);
+          delta += dx - edgeShift;
+        }
+        col.style.width = `${Math.max(MIN_COL, Math.round(start + delta))}px`;
         syncTableWidth(table, cols);
         onChange();
       },
